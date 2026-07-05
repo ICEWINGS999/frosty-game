@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>MIC DROP: Rap Campus Gauntlet</title>
 <style>
   @font-face {
@@ -24,6 +24,7 @@
     position: relative;
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -202,7 +203,8 @@
 
   #fire-btn {
     position: absolute;
-    bottom: 26px; right: 22px;
+    bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+    right: 22px;
     width: 78px; height: 78px;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #ffdf7a, #ff2f92 70%);
@@ -220,7 +222,8 @@
 
   .mobile-note {
     position: absolute;
-    bottom: 20px; left: 22px;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    left: 22px;
     color: #6b5a8a;
     font-size: 0.65rem;
     letter-spacing: 1px;
@@ -279,6 +282,11 @@
     </div>
   </div>
   <div id="round-indicator" class="hidden"></div>
+  <div id="rocket-indicator" class="hidden" style="
+    position:absolute; top:84px; left:50%; transform:translateX(-50%);
+    font-family:'Arial Black',sans-serif; font-size:0.85rem; letter-spacing:2px;
+    color:#ffcc33; text-shadow:0 0 10px #ffcc33aa; z-index:5;
+  ">🚀 ROCKET MODE</div>
 
   <div id="touch-zone" class="hidden"></div>
   <div id="fire-btn" class="hidden">FIRE</div>
@@ -384,6 +392,8 @@
       case 'gameOver': beep(220, 0.3, 'sawtooth', 0.09, 60); break;
       case 'finalWin': beep(340, 0.22, 'square', 0.1, 720); break;
       case 'tremor': beep(90, 0.12, 'sawtooth', 0.05, 70); break;
+      case 'powerup': beep(400, 0.22, 'square', 0.1, 900); break;
+      case 'rocketShoot': beep(300, 0.05, 'sawtooth', 0.04, 180); break;
     }
   }
 
@@ -391,13 +401,30 @@
   const canvas = document.getElementById('game-canvas');
   const ctx = canvas.getContext('2d');
   let W, H, DPR;
+  let gridCanvas = document.createElement('canvas');
+  let gridCtx = gridCanvas.getContext('2d');
+
+  function buildGrid() {
+    gridCanvas.width = W;
+    gridCanvas.height = H;
+    gridCtx.clearRect(0,0,W,H);
+    gridCtx.strokeStyle = 'rgba(120, 80, 180, 0.08)';
+    gridCtx.lineWidth = 1;
+    for (let gy=0; gy<H; gy+=28) {
+      gridCtx.beginPath(); gridCtx.moveTo(0,gy); gridCtx.lineTo(W,gy); gridCtx.stroke();
+    }
+    for (let gx=0; gx<W; gx+=28) {
+      gridCtx.beginPath(); gridCtx.moveTo(gx,0); gridCtx.lineTo(gx,H); gridCtx.stroke();
+    }
+  }
 
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     const wrap = document.getElementById('game-wrap');
+    const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
     // Arena is a fixed-ish aspect box, fit to viewport
     const maxW = Math.min(window.innerWidth, 520);
-    const maxH = Math.min(window.innerHeight, 760);
+    const maxH = Math.min(vh, 760);
     let w = maxW, h = w * (4/3);
     if (h > maxH) { h = maxH; w = h * (3/4); }
     W = Math.floor(w); H = Math.floor(h);
@@ -406,8 +433,10 @@
     canvas.width = Math.floor(W * DPR);
     canvas.height = Math.floor(H * DPR);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    buildGrid();
   }
   window.addEventListener('resize', resize);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
   resize();
 
   // ---------- Game data ----------
@@ -487,6 +516,8 @@
   let roundIndex = 0;
   let playerName = 'FROSTY';
   let player, boss, bullets, playerBullets, particles;
+  let powerupDrop = null, nextDropAt = 0, rocketModeTimer = 0;
+  const ROCKET_MODE_DURATION = 360; // frames (~6s at 60fps)
   let keys = {};
   let dragging = false, dragTargetX = 0, dragTargetY = 0;
   let firing = false;
@@ -540,6 +571,9 @@
     playerBullets = [];
     particles = [];
     bossTimer = 0;
+    powerupDrop = null;
+    nextDropAt = frame; // no delay — drop is now HP-triggered, can appear as soon as player is critical
+    rocketModeTimer = 0;
   }
 
   // ---------- Input ----------
@@ -631,8 +665,21 @@
   function dist(x1,y1,x2,y2){ return Math.hypot(x1-x2, y1-y2); }
 
   function spawnPlayerBullet() {
-    playerBullets.push({ x: player.x, y: player.y - player.r, vy: -7, r: 5 });
-    playSound('shoot');
+    if (rocketModeTimer > 0) {
+      // 3-way rocket spread, stronger damage, visually distinct
+      const speeds = [
+        { vx: -1.6, vy: -7.2 },
+        { vx: 0,    vy: -7.6 },
+        { vx: 1.6,  vy: -7.2 },
+      ];
+      for (const s of speeds) {
+        playerBullets.push({ x: player.x, y: player.y - player.r, vx: s.vx, vy: s.vy, r: 7, rocket: true, dmg: 6 });
+      }
+      playSound('rocketShoot');
+    } else {
+      playerBullets.push({ x: player.x, y: player.y - player.r, vx: 0, vy: -7, r: 5, dmg: 4 });
+      playSound('shoot');
+    }
   }
 
   function spawnBossBullet(x, y, vx, vy, color, r=6, ghostly=false) {
@@ -693,14 +740,14 @@
       }
     } else if (b.pattern === 'tremor') {
       // telegraphed wide "shaking" wall — a horizontal line of bullets that ripples
-      const count = lowHp ? 11 : 8;
+      const count = lowHp ? 8 : 6;
       const ripple = Math.sin(bossTimer*0.3) * 30;
       for (let i=0;i<count;i++){
         const spacing = W / (count+1);
         const bx = spacing * (i+1) + ripple;
         spawnBossBullet(bx, b.y + 40, 0, b.bulletSpeed*speedMult, b.color, 6);
       }
-      playSound('tremor');
+      if (bossTimer % (effectiveFireRate*3) === 0) playSound('tremor');
     } else if (b.pattern === 'phase') {
       // mysterious fading bullets in a rotating ring, some invisible-ish (low opacity) until close
       const arms = lowHp ? 10 : 7;
@@ -769,9 +816,39 @@
     player.y = Math.max(H*0.45, Math.min(H-player.r-4, player.y));
 
     if (player.invuln > 0) player.invuln--;
+    if (rocketModeTimer > 0) rocketModeTimer--;
+
+    // power-up drop: spawns only when player HP is critically low (comeback mechanic)
+    if (gameState === 'fighting') {
+      const lowHpThreshold = Math.max(1, Math.ceil(player.maxHp * 0.2)); // ~20% of max HP, min 1
+      const playerCritical = player.hp <= lowHpThreshold;
+      if (!powerupDrop && playerCritical && frame >= nextDropAt) {
+        powerupDrop = {
+          x: 40 + Math.random() * (W - 80),
+          y: -20,
+          r: 16,
+          vy: 1.6,
+        };
+      }
+      if (powerupDrop) {
+        powerupDrop.y += powerupDrop.vy;
+        if (dist(powerupDrop.x, powerupDrop.y, player.x, player.y) < player.r + powerupDrop.r) {
+          rocketModeTimer = ROCKET_MODE_DURATION;
+          flashText('ROCKET MODE!', '#ffcc33');
+          playSound('powerup');
+          spawnHitParticles(powerupDrop.x, powerupDrop.y, '#ffcc33', 20);
+          powerupDrop = null;
+          nextDropAt = frame + 300; // cooldown before another can appear, even if still critical
+        } else if (powerupDrop.y > H + 30) {
+          powerupDrop = null;
+          nextDropAt = frame + 300;
+        }
+      }
+    }
 
     // firing
-    if (firing && frame % 8 === 0) spawnPlayerBullet();
+    const fireInterval = rocketModeTimer > 0 ? 10 : 8;
+    if (firing && frame % fireInterval === 0) spawnPlayerBullet();
 
     // bullet vs bullet cancel — check before hit detection so cancels take priority
     for (let i=playerBullets.length-1;i>=0;i--){
@@ -793,10 +870,11 @@
     // player bullets
     for (let i=playerBullets.length-1;i>=0;i--){
       const pb = playerBullets[i];
+      pb.x += (pb.vx||0);
       pb.y += pb.vy;
-      if (pb.y < -20) { playerBullets.splice(i,1); continue; }
+      if (pb.y < -20 || pb.x < -20 || pb.x > W+20) { playerBullets.splice(i,1); continue; }
       if (dist(pb.x,pb.y,boss.x,boss.y) < boss.r + pb.r) {
-        boss.hp -= 4;
+        boss.hp -= (pb.dmg || 4);
         spawnHitParticles(pb.x,pb.y, boss.color, 6);
         playerBullets.splice(i,1);
         hitFlash = 4;
@@ -825,6 +903,10 @@
       p.life--;
       if (p.life <= 0) particles.splice(i,1);
     }
+    // safety cap: if particles pile up (rapid hits), trim oldest first
+    if (particles.length > 120) particles.splice(0, particles.length - 120);
+    // safety cap: prevent runaway bullet buildup on dense patterns like tremor
+    if (bullets.length > 90) bullets.splice(0, bullets.length - 90);
 
     updateHud();
   }
@@ -857,6 +939,7 @@
     $('boss-hp-text').textContent = Math.ceil(pct) + '%';
     $('boss-hp-inner').style.width = pct + '%';
     $('boss-name-tag').textContent = boss.name;
+    $('rocket-indicator').classList.toggle('hidden', rocketModeTimer <= 0);
   }
 
   // ---------- Render ----------
@@ -871,15 +954,8 @@
     ctx.save();
     ctx.translate(shakeX, shakeY);
 
-    // stage floor grid
-    ctx.strokeStyle = 'rgba(120, 80, 180, 0.08)';
-    ctx.lineWidth = 1;
-    for (let gy=0; gy<H; gy+=28) {
-      ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(W,gy); ctx.stroke();
-    }
-    for (let gx=0; gx<W; gx+=28) {
-      ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,H); ctx.stroke();
-    }
+    // stage floor grid (pre-rendered, just blit it)
+    ctx.drawImage(gridCanvas, 0, 0, W, H);
 
     // spotlight on boss
     if (boss) {
@@ -915,8 +991,6 @@
         alpha = Math.min(1, (b.age||0) / 30) * 0.85 + 0.15;
       }
       ctx.globalAlpha = alpha;
-      ctx.shadowColor = b.color;
-      ctx.shadowBlur = 10;
       ctx.fillStyle = b.color;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
@@ -927,15 +1001,34 @@
     // player bullets
     for (const pb of (playerBullets || [])) {
       ctx.save();
-      ctx.shadowColor = '#00f0ff';
-      ctx.shadowBlur = 12;
-      const grad = ctx.createLinearGradient(pb.x, pb.y-10, pb.x, pb.y+10);
-      grad.addColorStop(0, '#ffffff');
-      grad.addColorStop(1, '#00f0ff');
-      ctx.fillStyle = grad;
+      if (pb.rocket) {
+        ctx.fillStyle = '#ffcc33';
+        ctx.beginPath();
+        ctx.ellipse(pb.x, pb.y, pb.r*0.7, pb.r*1.6, 0, 0, Math.PI*2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = '#7ff5ff';
+        ctx.beginPath();
+        ctx.ellipse(pb.x, pb.y, pb.r*0.6, pb.r*1.4, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // power-up drop
+    if (powerupDrop) {
+      ctx.save();
+      const bob = Math.sin(frame*0.15) * 3;
+      ctx.shadowColor = '#ffcc33';
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = '#ffcc33';
       ctx.beginPath();
-      ctx.ellipse(pb.x, pb.y, pb.r*0.6, pb.r*1.4, 0, 0, Math.PI*2);
+      ctx.arc(powerupDrop.x, powerupDrop.y + bob, powerupDrop.r, 0, Math.PI*2);
       ctx.fill();
+      ctx.font = '18px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🚀', powerupDrop.x, powerupDrop.y + bob + 1);
       ctx.restore();
     }
 
@@ -992,6 +1085,7 @@
     roundIndicator.classList.add('hidden');
     touchZone.classList.add('hidden');
     fireBtn.classList.add('hidden');
+    $('rocket-indicator').classList.add('hidden');
     mobileNote.classList.add('hidden');
     initPlayer();
     beginRound();
@@ -1046,6 +1140,7 @@
     roundIndicator.classList.add('hidden');
     touchZone.classList.add('hidden');
     fireBtn.classList.add('hidden');
+    $('rocket-indicator').classList.add('hidden');
     mobileNote.classList.add('hidden');
     $('win-line').textContent = BOSSES[roundIndex].winLine;
     $('frosty-taunt').textContent = BOSSES[roundIndex].frostyTaunt ? `${playerName}: ${BOSSES[roundIndex].frostyTaunt}` : '';
@@ -1066,6 +1161,7 @@
     roundIndicator.classList.add('hidden');
     touchZone.classList.add('hidden');
     fireBtn.classList.add('hidden');
+    $('rocket-indicator').classList.add('hidden');
     mobileNote.classList.add('hidden');
     $('end-desc').textContent = `${BOSSES[roundIndex].name} got the last word this time. Get back in there.`;
     showOverlay('game-over');
@@ -1081,6 +1177,7 @@
     roundIndicator.classList.add('hidden');
     touchZone.classList.add('hidden');
     fireBtn.classList.add('hidden');
+    $('rocket-indicator').classList.add('hidden');
     mobileNote.classList.add('hidden');
     $('final-desc').textContent = `${playerName} cleared the whole gauntlet — Maroona, Jade, Shakes, Ghost, and even Icewings. The roster's got a new name to watch.`;
     $('rounds-cleared-stat').textContent = `${BOSSES.length}/${BOSSES.length}`;
@@ -1095,6 +1192,4 @@
 })();
 </script>
 </body>
-  </html>
-  
-  
+</html>
