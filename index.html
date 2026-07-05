@@ -270,7 +270,7 @@
 
   <div id="hud" class="hidden">
     <div class="hp-block">
-      <div class="hp-label"><span>FROSTY</span><span id="player-hp-text">4/4</span></div>
+      <div class="hp-label"><span id="hud-player-name">FROSTY</span><span id="player-hp-text">4/4</span></div>
       <div class="hp-bar-outer"><div id="player-hp-inner" class="hp-bar-inner" style="width:100%"></div></div>
     </div>
     <div class="hp-block boss">
@@ -288,7 +288,22 @@
   <div id="title-screen" class="overlay">
     <div class="title-glow display">MIC DROP</div>
     <div class="subtitle">RAP CAMPUS GAUNTLET</div>
-    <div class="desc">Frosty's stepping into the arena. Three rivals stand between you and the crown — dodge their bars, land your shots, and prove you belong on the roster.</div>
+    <div class="desc" id="title-desc">Step into the arena. Five rivals stand between you and the crown — dodge their bars, land your shots, and prove you belong on the roster.</div>
+    <input type="text" id="player-name-input" maxlength="14" placeholder="ENTER YOUR NAME" autocomplete="off" style="
+      font-family: 'Arial Black', sans-serif;
+      background: #150a24;
+      border: 2px solid #ff2f92;
+      color: #f5f0ff;
+      padding: 12px 18px;
+      font-size: 1rem;
+      letter-spacing: 2px;
+      text-align: center;
+      text-transform: uppercase;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      width: 240px;
+      box-shadow: 0 0 14px #ff2f9244;
+    ">
     <button class="btn" id="start-btn">START BATTLE</button>
     <div class="controls-hint">MOVE: ARROW KEYS / WASD / DRAG &nbsp;•&nbsp; FIRE: SPACE / TAP</div>
   </div>
@@ -404,7 +419,7 @@
       emoji: '🔥',
       line: "\"You came to the campus in flip flops. I'm about to send you home barefoot.\"",
       winLine: "Maroona taps the mic twice and walks off — no words left.",
-      frostyTaunt: "Frosty: \"Flip flops got range apparently.\"",
+      frostyTaunt: "\"Flip flops got range apparently.\"",
       maxHp: 100,
       pattern: 'spiral',
       bulletSpeed: 2.1,
@@ -416,9 +431,9 @@
       name: 'JADE',
       color: '#39ff9e',
       emoji: '💎',
-      line: "\"Frosty? More like a puddle by the second verse. Watch the footwork.\"",
+      line: "\"{name}? More like a puddle by the second verse. Watch the footwork.\"",
       winLine: "Jade drops the mic stand and gives you a slow clap.",
-      frostyTaunt: "Frosty: \"Puddle's still standing though.\"",
+      frostyTaunt: "\"Puddle's still standing though.\"",
       maxHp: 130,
       pattern: 'crossfire',
       bulletSpeed: 2.0,
@@ -432,7 +447,7 @@
       emoji: '🌀',
       line: "\"Relax. I already know how this ends. I've seen it in my sleep.\"",
       winLine: "Shakes just smiles and fades back into the crowd.",
-      frostyTaunt: "Frosty: \"Bet you didn't see that one coming either.\"",
+      frostyTaunt: "\"Bet you didn't see that one coming either.\"",
       maxHp: 145,
       pattern: 'tremor',
       bulletSpeed: 2.3,
@@ -446,7 +461,7 @@
       emoji: '👻',
       line: "\"You won't see the bar that ends you. You'll just... stop hearing anything.\"",
       winLine: "Ghost dissolves into static before the crowd even reacts.",
-      frostyTaunt: "Frosty: \"Can't haunt what you can't catch.\"",
+      frostyTaunt: "\"Can't haunt what you can't catch.\"",
       maxHp: 155,
       pattern: 'phase',
       bulletSpeed: 2.5,
@@ -458,9 +473,9 @@
       name: 'ICEWINGS',
       color: '#00f0ff',
       emoji: '❄️',
-      line: "\"I taught you everything you know, Frosty. I didn't teach you everything I know.\"",
+      line: "\"I taught you everything you know, {name}. I didn't teach you everything I know.\"",
       winLine: "Icewings nods, actually impressed. \"...Aight. Aight! You earned that.\"",
-      frostyTaunt: "Frosty: \"Told you I was paying attention in class.\"",
+      frostyTaunt: "\"Told you I was paying attention in class.\"",
       maxHp: 170,
       pattern: 'gauntlet',
       bulletSpeed: 3.0,
@@ -470,6 +485,7 @@
   ];
 
   let roundIndex = 0;
+  let playerName = 'FROSTY';
   let player, boss, bullets, playerBullets, particles;
   let keys = {};
   let dragging = false, dragTargetX = 0, dragTargetY = 0;
@@ -966,6 +982,10 @@
   // ---------- Flow control ----------
   function startGame() {
     ensureAudio();
+    const nameInput = $('player-name-input');
+    const typed = nameInput ? nameInput.value.trim().toUpperCase() : '';
+    playerName = typed.length > 0 ? typed : 'FROSTY';
+    $('hud-player-name').textContent = playerName;
     roundIndex = 0;
     hideAllOverlays();
     hud.classList.add('hidden');
@@ -989,7 +1009,7 @@
     $('boss-name').style.color = def.color;
     $('boss-line').innerHTML = '';
     showOverlay('boss-intro');
-    typeLine($('boss-line'), def.line);
+    typeLine($('boss-line'), def.line.replace(/\{name\}/g, playerName));
   }
 
   function typeLine(el, text) {
@@ -1028,7 +1048,7 @@
     fireBtn.classList.add('hidden');
     mobileNote.classList.add('hidden');
     $('win-line').textContent = BOSSES[roundIndex].winLine;
-    $('frosty-taunt').textContent = BOSSES[roundIndex].frostyTaunt || '';
+    $('frosty-taunt').textContent = BOSSES[roundIndex].frostyTaunt ? `${playerName}: ${BOSSES[roundIndex].frostyTaunt}` : '';
     showOverlay('round-win');
   }
 
@@ -1062,7 +1082,7 @@
     touchZone.classList.add('hidden');
     fireBtn.classList.add('hidden');
     mobileNote.classList.add('hidden');
-    $('final-desc').textContent = "Frosty cleared the whole gauntlet — Maroona, Jade, Shakes, Ghost, and even Icewings. The roster's got a new name to watch.";
+    $('final-desc').textContent = `${playerName} cleared the whole gauntlet — Maroona, Jade, Shakes, Ghost, and even Icewings. The roster's got a new name to watch.`;
     $('rounds-cleared-stat').textContent = `${BOSSES.length}/${BOSSES.length}`;
     showOverlay('final-win');
   }
@@ -1076,4 +1096,5 @@
 </script>
 </body>
   </html>
+  
   
