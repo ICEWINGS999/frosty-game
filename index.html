@@ -193,7 +193,7 @@
     z-index: 5;
   }
 
-  /* touch controls */
+  /* touch controls: single floating joystick, appears wherever you press */
   #touch-zone {
     position: absolute;
     inset: 0;
@@ -201,34 +201,41 @@
     touch-action: none;
   }
 
-  #fire-btn {
+  #joystick-base {
     position: absolute;
-    bottom: calc(90px + env(safe-area-inset-bottom, 0px));
-    right: 22px;
-    width: 78px; height: 78px;
+    width: 100px; height: 100px;
+    border-radius: 50%;
+    border: 3px solid #ff2f9288;
+    background: radial-gradient(circle, #ff2f9222, transparent 70%);
+    box-shadow: 0 0 20px #ff2f9244;
+    display: none;
+    z-index: 20;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+  }
+  #joystick-nub {
+    position: absolute;
+    width: 46px; height: 46px;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #ffdf7a, #ff2f92 70%);
-    border: 3px solid #fff2;
-    box-shadow: 0 0 24px #ff2f92aa;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 0.75rem;
-    font-weight: 900;
-    color: #fff;
-    letter-spacing: 1px;
-    z-index: 20;
-    touch-action: none;
+    border: 2px solid #fff3;
+    box-shadow: 0 0 16px #ff2f92cc;
+    display: none;
+    z-index: 21;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
   }
-  #fire-btn:active { transform: scale(0.92); }
+  #joystick-base.active, #joystick-nub.active { display: block; }
 
   .mobile-note {
     position: absolute;
-    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
     left: 22px;
     color: #6b5a8a;
     font-size: 0.65rem;
     letter-spacing: 1px;
     z-index: 6;
-    max-width: 140px;
+    max-width: 160px;
     line-height: 1.4;
   }
 
@@ -289,8 +296,9 @@
   ">🚀 ROCKET MODE</div>
 
   <div id="touch-zone" class="hidden"></div>
-  <div id="fire-btn" class="hidden">FIRE</div>
-  <div class="mobile-note hidden" id="mobile-note">DRAG ANYWHERE TO MOVE. TAP FIRE TO SHOOT.</div>
+  <div id="joystick-base"></div>
+  <div id="joystick-nub"></div>
+  <div class="mobile-note hidden" id="mobile-note">PRESS &amp; HOLD ANYWHERE. DRAG TO MOVE — AUTO-FIRES WHILE HELD.</div>
 
   <!-- TITLE SCREEN -->
   <div id="title-screen" class="overlay">
@@ -519,7 +527,7 @@
   let powerupDrop = null, nextDropAt = 0, rocketModeTimer = 0;
   const ROCKET_MODE_DURATION = 360; // frames (~6s at 60fps)
   let keys = {};
-  let dragging = false, dragTargetX = 0, dragTargetY = 0;
+  let dragging = false;
   let firing = false;
   let frame = 0;
   let gameState = 'title'; // title, intro, fighting, roundwin, gameover, finalwin
@@ -533,7 +541,8 @@
   const hud = $('hud');
   const roundIndicator = $('round-indicator');
   const touchZone = $('touch-zone');
-  const fireBtn = $('fire-btn');
+  const joystickBase = $('joystick-base');
+  const joystickNub = $('joystick-nub');
   const mobileNote = $('mobile-note');
 
   function showOverlay(id) {
@@ -594,31 +603,70 @@
     };
   }
 
-  function isInsideFireBtn(clientX, clientY) {
-    const rect = fireBtn.getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  // ---------- Single-thumb floating joystick: hold anywhere to move + auto-fire ----------
+  const JOY_MAX_RADIUS = 50; // px, how far the nub can travel from base before clamping
+  let joyTouchId = null;
+  let joyBaseX = 0, joyBaseY = 0; // where the thumb first pressed (screen coords)
+  let joyDX = 0, joyDY = 0; // normalized direction (-1..1) derived from nub offset
+
+  function positionJoystick(screenX, screenY, nubX, nubY) {
+    joystickBase.style.left = screenX + 'px';
+    joystickBase.style.top = screenY + 'px';
+    joystickNub.style.left = nubX + 'px';
+    joystickNub.style.top = nubY + 'px';
   }
 
-  let moveTouchId = null;
+  function startJoystick(clientX, clientY) {
+    joyBaseX = clientX; joyBaseY = clientY;
+    joystickBase.classList.add('active');
+    joystickNub.classList.add('active');
+    positionJoystick(clientX, clientY, clientX, clientY);
+    firing = true;
+    dragging = true;
+    joyDX = 0; joyDY = 0;
+  }
+
+  function moveJoystick(clientX, clientY) {
+    let dx = clientX - joyBaseX;
+    let dy = clientY - joyBaseY;
+    const mag = Math.hypot(dx, dy);
+    if (mag > JOY_MAX_RADIUS) {
+      dx = (dx / mag) * JOY_MAX_RADIUS;
+      dy = (dy / mag) * JOY_MAX_RADIUS;
+    }
+    positionJoystick(joyBaseX, joyBaseY, joyBaseX + dx, joyBaseY + dy);
+    // normalized direction, scaled by how far from center (soft deadzone near center)
+    const pct = Math.min(1, mag / JOY_MAX_RADIUS);
+    if (mag > 4) {
+      joyDX = (dx / JOY_MAX_RADIUS);
+      joyDY = (dy / JOY_MAX_RADIUS);
+    } else {
+      joyDX = 0; joyDY = 0;
+    }
+  }
+
+  function endJoystick() {
+    joyTouchId = null;
+    joystickBase.classList.remove('active');
+    joystickNub.classList.remove('active');
+    firing = false;
+    dragging = false;
+    joyDX = 0; joyDY = 0;
+  }
 
   touchZone.addEventListener('touchstart', e => {
-    for (const t of e.changedTouches) {
-      if (isInsideFireBtn(t.clientX, t.clientY)) continue; // let fire button handle its own touch
-      if (moveTouchId === null) {
-        moveTouchId = t.identifier;
-        dragging = true;
-        const p = getCanvasPos(t.clientX, t.clientY);
-        dragTargetX = p.x; dragTargetY = p.y;
-      }
+    if (joyTouchId === null) {
+      const t = e.changedTouches[0];
+      joyTouchId = t.identifier;
+      startJoystick(t.clientX, t.clientY);
     }
     e.preventDefault();
   }, {passive:false});
 
   touchZone.addEventListener('touchmove', e => {
     for (const t of e.changedTouches) {
-      if (t.identifier === moveTouchId) {
-        const p = getCanvasPos(t.clientX, t.clientY);
-        dragTargetX = p.x; dragTargetY = p.y;
+      if (t.identifier === joyTouchId) {
+        moveJoystick(t.clientX, t.clientY);
       }
     }
     e.preventDefault();
@@ -626,43 +674,34 @@
 
   touchZone.addEventListener('touchend', e => {
     for (const t of e.changedTouches) {
-      if (t.identifier === moveTouchId) {
-        moveTouchId = null;
-        dragging = false;
-      }
+      if (t.identifier === joyTouchId) endJoystick();
     }
     e.preventDefault();
   }, {passive:false});
-
-  fireBtn.addEventListener('touchstart', e => {
-    firing = true;
-    e.preventDefault();
-    e.stopPropagation();
+  touchZone.addEventListener('touchcancel', e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyTouchId) endJoystick();
+    }
   }, {passive:false});
-  fireBtn.addEventListener('touchend', e => {
-    firing = false;
-    e.preventDefault();
-    e.stopPropagation();
-  }, {passive:false});
-  fireBtn.addEventListener('mousedown', () => firing = true);
-  fireBtn.addEventListener('mouseup', () => firing = false);
 
-  // mouse fallback for desktop drag
+  // mouse fallback for desktop testing
   let mouseDown = false;
   touchZone.addEventListener('mousedown', e => {
-    mouseDown = true; dragging = true;
-    const p = getCanvasPos(e.clientX, e.clientY);
-    dragTargetX = p.x; dragTargetY = p.y;
+    mouseDown = true;
+    startJoystick(e.clientX, e.clientY);
   });
   window.addEventListener('mousemove', e => {
     if (!mouseDown) return;
-    const p = getCanvasPos(e.clientX, e.clientY);
-    dragTargetX = p.x; dragTargetY = p.y;
+    moveJoystick(e.clientX, e.clientY);
   });
-  window.addEventListener('mouseup', () => { mouseDown = false; dragging = false; });
+  window.addEventListener('mouseup', () => {
+    if (mouseDown) { mouseDown = false; endJoystick(); }
+  });
 
   // ---------- Helpers ----------
   function dist(x1,y1,x2,y2){ return Math.hypot(x1-x2, y1-y2); }
+  // faster threshold check: avoids sqrt, used anywhere we only care "closer than X"
+  function within(x1,y1,x2,y2,r){ const dx=x1-x2, dy=y1-y2; return (dx*dx+dy*dy) < r*r; }
 
   function spawnPlayerBullet() {
     if (rocketModeTimer > 0) {
@@ -803,14 +842,10 @@
       const len = Math.hypot(dx,dy);
       player.x += (dx/len) * player.speed;
       player.y += (dy/len) * player.speed;
-    } else if (dragging) {
-      const ddx = dragTargetX - player.x;
-      const ddy = dragTargetY - player.y;
-      const d = Math.hypot(ddx,ddy);
-      if (d > 3) {
-        player.x += (ddx/d) * Math.min(player.speed*1.4, d);
-        player.y += (ddy/d) * Math.min(player.speed*1.4, d);
-      }
+    } else if (dragging && (joyDX !== 0 || joyDY !== 0)) {
+      // joystick direction is already normalized-ish (-1..1 per axis), scale by speed
+      player.x += joyDX * player.speed;
+      player.y += joyDY * player.speed;
     }
     player.x = Math.max(player.r+4, Math.min(W-player.r-4, player.x));
     player.y = Math.max(H*0.45, Math.min(H-player.r-4, player.y));
@@ -832,7 +867,7 @@
       }
       if (powerupDrop) {
         powerupDrop.y += powerupDrop.vy;
-        if (dist(powerupDrop.x, powerupDrop.y, player.x, player.y) < player.r + powerupDrop.r) {
+        if (within(powerupDrop.x, powerupDrop.y, player.x, player.y, player.r + powerupDrop.r)) {
           rocketModeTimer = ROCKET_MODE_DURATION;
           flashText('ROCKET MODE!', '#ffcc33');
           playSound('powerup');
@@ -856,7 +891,7 @@
       let canceled = false;
       for (let j=bullets.length-1;j>=0;j--){
         const b = bullets[j];
-        if (dist(pb.x,pb.y,b.x,b.y) < pb.r + b.r) {
+        if (within(pb.x,pb.y,b.x,b.y, pb.r + b.r)) {
           spawnHitParticles((pb.x+b.x)/2, (pb.y+b.y)/2, '#ffffff', 10);
           bullets.splice(j,1);
           canceled = true;
@@ -873,7 +908,7 @@
       pb.x += (pb.vx||0);
       pb.y += pb.vy;
       if (pb.y < -20 || pb.x < -20 || pb.x > W+20) { playerBullets.splice(i,1); continue; }
-      if (dist(pb.x,pb.y,boss.x,boss.y) < boss.r + pb.r) {
+      if (within(pb.x,pb.y,boss.x,boss.y, boss.r + pb.r)) {
         boss.hp -= (pb.dmg || 4);
         spawnHitParticles(pb.x,pb.y, boss.color, 6);
         playerBullets.splice(i,1);
@@ -890,7 +925,7 @@
       b.x += b.vx; b.y += b.vy;
       b.age = (b.age||0) + 1;
       if (b.x < -30 || b.x > W+30 || b.y < -30 || b.y > H+30) { bullets.splice(i,1); continue; }
-      if (player.invuln === 0 && dist(b.x,b.y,player.x,player.y) < player.r + b.r - 2) {
+      if (player.invuln === 0 && within(b.x,b.y,player.x,player.y, player.r + b.r - 2)) {
         bullets.splice(i,1);
         onPlayerHit();
       }
@@ -957,13 +992,14 @@
     // stage floor grid (pre-rendered, just blit it)
     ctx.drawImage(gridCanvas, 0, 0, W, H);
 
-    // spotlight on boss
+    // spotlight on boss (only fill the glow's bounding box, not the whole canvas)
     if (boss) {
-      const grad = ctx.createRadialGradient(boss.x, boss.y, 10, boss.x, boss.y, 160);
+      const glowR = 160;
+      const grad = ctx.createRadialGradient(boss.x, boss.y, 10, boss.x, boss.y, glowR);
       grad.addColorStop(0, boss.color + '33');
       grad.addColorStop(1, 'transparent');
       ctx.fillStyle = grad;
-      ctx.fillRect(0,0,W,H);
+      ctx.fillRect(boss.x-glowR, boss.y-glowR, glowR*2, glowR*2);
     }
 
     // boss
@@ -1084,7 +1120,6 @@
     hud.classList.add('hidden');
     roundIndicator.classList.add('hidden');
     touchZone.classList.add('hidden');
-    fireBtn.classList.add('hidden');
     $('rocket-indicator').classList.add('hidden');
     mobileNote.classList.add('hidden');
     initPlayer();
@@ -1127,7 +1162,6 @@
     roundIndicator.textContent = `ROUND ${roundIndex+1} OF ${BOSSES.length}`;
     touchZone.classList.remove('hidden');
     if (isTouch) {
-      fireBtn.classList.remove('hidden');
       mobileNote.classList.remove('hidden');
     }
     player.invuln = 60;
@@ -1139,7 +1173,6 @@
     hud.classList.add('hidden');
     roundIndicator.classList.add('hidden');
     touchZone.classList.add('hidden');
-    fireBtn.classList.add('hidden');
     $('rocket-indicator').classList.add('hidden');
     mobileNote.classList.add('hidden');
     $('win-line').textContent = BOSSES[roundIndex].winLine;
@@ -1160,7 +1193,6 @@
     hud.classList.add('hidden');
     roundIndicator.classList.add('hidden');
     touchZone.classList.add('hidden');
-    fireBtn.classList.add('hidden');
     $('rocket-indicator').classList.add('hidden');
     mobileNote.classList.add('hidden');
     $('end-desc').textContent = `${BOSSES[roundIndex].name} got the last word this time. Get back in there.`;
@@ -1176,7 +1208,6 @@
     hud.classList.add('hidden');
     roundIndicator.classList.add('hidden');
     touchZone.classList.add('hidden');
-    fireBtn.classList.add('hidden');
     $('rocket-indicator').classList.add('hidden');
     mobileNote.classList.add('hidden');
     $('final-desc').textContent = `${playerName} cleared the whole gauntlet — Maroona, Jade, Shakes, Ghost, and even Icewings. The roster's got a new name to watch.`;
@@ -1193,3 +1224,4 @@
 </script>
 </body>
 </html>
+
